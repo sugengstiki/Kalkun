@@ -252,61 +252,84 @@ class Phonebook_model extends Model {
 	 * @return
 	 */		
 	function add_contact($param)
-	{
+	{		
         $param['Number'] = str_replace(' ', '', $param['Number']);
         $param['Number'] = str_replace('-', '', $param['Number']);
+		$param['number'] = $param['Number'];
+		
 		$this->db->set('Name', $param['Name']);
 		$this->db->set('Number', $param['Number']);
 		$this->db->set('id_user', $param['id_user']);
 		$this->db->set('is_public', $param['is_public']);
 		
-		// edit mode
-		if(isset($param['id_pbk'])) 
+		$param['option'] = 'bynumber';		
+		
+		//find user in phonebook
+		$user = $this->get_phonebook($param)->row();				
+		
+		$edited = false;
+		if(isset($param['id_pbk'])) // edit mode
 		{
 			$this->db->where('ID', $param['id_pbk']);
 			$this->db->update('pbk');
+			$edited = true;
 		}
-		else $this->db->insert('pbk');
-        
-        // optimisation required.
+		else {
+			if(is_object($user)) // existing user
+			{		
+				$param['id_pbk'] = $user->id_pbk;
+				$this->db->where('ID', $param['id_pbk']);
+				$this->db->update('pbk');	
+
+				$groupnya = $this->get_groups($param['id_pbk'],$param['id_user']); 
+				$group_ids = split(",",$groupnya->GroupIDs);				
+			} else 			
+				$this->db->insert('pbk');  //new user
+			
+		} 			
+
+		// optimisation required.
         if(isset($param['id_pbk'])) 
 		{
-            $pbk_id = $param['id_pbk'];
+            $pbk_id = $param['id_pbk'];			
         }
         else $pbk_id = $this->db->insert_id();
-        
-        //delete past groups
-        $this->db->delete('user_group', array('id_pbk' => $pbk_id)); 
-        
-        // now insert the lastest
-        if(isset($param['GroupID']))
-            if(!empty($param['GroupID']))
+		
+		//delete past groups if edited
+		if($edited){
+			$this->db->delete('user_group', array('id_pbk' => $pbk_id)); 			
+		}
+        		
+        // now insert the lastest group if not exist (from imported csv)	
+        if(isset($param['GroupID'])){
+            if(!empty($param['GroupID']) && !in_array($param['GroupID'],$group_ids ))
             {
                 $this->db->set('id_pbk', $pbk_id);
         		$this->db->set('id_pbk_groups', $param['GroupID']);
         		$this->db->set('id_user', $param['id_user']);
-                $this->db->insert('user_group');
+                $this->db->insert('user_group');				
             }
-        if(isset($param['Groups']))
-        if(!empty($param['Groups'])){
-            $groups = array_unique(explode(',',$param['Groups']));
-            $CI =& get_instance();
-            foreach($groups as $_grp)
-            {   
-                $group_id  = $CI->Phonebook_model->group_id($_grp,$param['id_user']);
-                
-                if($group_id != null)
-                {
-                    $this->db->set('id_pbk', $pbk_id);
-            		$this->db->set('id_pbk_groups', $group_id);
-            		$this->db->set('id_user', $param['id_user']);
-                    $this->db->insert('user_group');
-                }
-            }
-             
-            
-        }
-        
+		} else {
+			//from add contact menu
+			if(isset($param['Groups']))
+			if(!empty($param['Groups'])){
+				$groups = array_unique(explode(',',$param['Groups']));
+				
+				$CI =& get_instance();
+				foreach($groups as $_grp)
+				{   
+					$group_id  = $CI->Phonebook_model->group_id($_grp,$param['id_user']);
+						
+					if($group_id != null && !in_array($group_id,$group_ids ) || $edited)
+					{
+						$this->db->set('id_pbk', $pbk_id);
+						$this->db->set('id_pbk_groups', $group_id);
+						$this->db->set('id_user', $param['id_user']);
+						$this->db->insert('user_group');												
+					} 
+				}
+			}
+		}
 	}
   
   function multi_attach_group()
@@ -423,6 +446,7 @@ class Phonebook_model extends Model {
         $this->db->join('pbk_groups', 'pbk_groups.ID=user_group.id_pbk_groups');           
         $this->db->where('user_group.id_user', $user_id);
 		$this->db->where('user_group.id_pbk', $pbk_id);
+		$this->db->order_by('GroupID');
         $q =  $this->db->get();
         $GroupID = $GroupName = '';
         foreach ($q->result() as $_gp) 
